@@ -8,6 +8,8 @@ export interface SettingsDraft {
 	equalizerEnabled: boolean;
 }
 
+export type SttBackend = "qwen3-asr" | "sense-voice";
+
 export interface VoiceState {
 	currentScreen: ScreenKind;
 	status: RecordingStatus;
@@ -27,6 +29,8 @@ export interface VoiceState {
 	/** Which interactive settings field is currently focused. Up/Down arrows
 	 *  cycle through `SETTINGS_FIELD_ORDER`; Enter toggles the focused one. */
 	settingsFocus: SettingsFieldKey;
+	/** Which STT backend is currently active. Updated after each recognition. */
+	sttBackend: SttBackend;
 }
 
 export const SETTINGS_FIELD_ORDER: readonly SettingsFieldKey[] = ["hallucination", "equalizer"];
@@ -44,5 +48,6 @@ export function initialVoiceState(draft: SettingsDraft): VoiceState {
 		audioLevel: 0,
 		settingsDraft: draft,
 		settingsFocus: SETTINGS_FIELD_ORDER[0]!,
+		sttBackend: "qwen3-asr",
 	};
 }

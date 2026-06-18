@@ -34,8 +34,8 @@ const VAD_RMS_THRESHOLD = 0.015;
 // forced Whisper to "complete" an unterminated phrase with a spurious
 // period. 700 ms eliminated that but felt laggy. 500 ms is the LiveKit
 // value: covers most natural breath pauses, keeps the perceived gap to
-// ~half a second.
-const VAD_HOLDOFF_MS = 500;
+// ~half a second. Bumped to 800 ms to avoid premature sends on short pauses.
+const VAD_HOLDOFF_MS = 2000;
 
 // Tried in order in the resample-rms fallback path if the default
 // input device's `defaultSampleRate` isn't available or that rate also

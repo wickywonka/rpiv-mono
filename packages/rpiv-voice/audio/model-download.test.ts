@@ -18,9 +18,9 @@ import {
 	ensureModelDownloaded,
 	getModelPaths,
 	isModelDownloaded,
+	MODEL_DIR,
 	ModelInstallError,
 	removeModelInstall,
-	WHISPER_BASE_DIR,
 } from "./model-download.js";
 
 describe("isModelDownloaded", () => {
@@ -35,11 +35,11 @@ describe("isModelDownloaded", () => {
 });
 
 describe("getModelPaths", () => {
-	it("returns paths under whisper-base/", () => {
+	it("returns paths under sense-voice/", () => {
 		const paths = getModelPaths();
-		expect(paths.encoderPath).toContain("whisper-base");
-		expect(paths.decoderPath).toContain("whisper-base");
-		expect(paths.tokensPath).toContain("whisper-base");
+		expect(paths.modelPath).toContain("sense-voice");
+		expect(paths.modelPath).toContain("model.int8.onnx");
+		expect(paths.tokensPath).toContain("tokens.txt");
 	});
 });
 
@@ -48,7 +48,7 @@ describe("ensureModelDownloaded", () => {
 		vi.mocked(existsSync).mockReturnValue(true);
 		const onProgress = vi.fn();
 		const paths = await ensureModelDownloaded(onProgress);
-		expect(paths.encoderPath).toContain("base-encoder.int8.onnx");
+		expect(paths.modelPath).toContain("model.int8.onnx");
 		expect(onProgress).not.toHaveBeenCalled();
 	});
 });
@@ -74,9 +74,7 @@ describe("ensureModelDownloaded — failure rollback", () => {
 			stage: "download",
 		});
 
-		const wiped = vi
-			.mocked(rmSync)
-			.mock.calls.some((args) => args[0] === WHISPER_BASE_DIR && args[1]?.recursive === true);
+		const wiped = vi.mocked(rmSync).mock.calls.some((args) => args[0] === MODEL_DIR && args[1]?.recursive === true);
 		expect(wiped).toBe(true);
 	});
 
@@ -91,18 +89,16 @@ describe("ensureModelDownloaded — failure rollback", () => {
 		expect(err).toBeInstanceOf(ModelInstallError);
 		expect((err as ModelInstallError).stage).toBe("download");
 
-		const wiped = vi
-			.mocked(rmSync)
-			.mock.calls.some((args) => args[0] === WHISPER_BASE_DIR && args[1]?.recursive === true);
+		const wiped = vi.mocked(rmSync).mock.calls.some((args) => args[0] === MODEL_DIR && args[1]?.recursive === true);
 		expect(wiped).toBe(true);
 	});
 });
 
 describe("removeModelInstall", () => {
-	it("rmSyncs the whisper-base dir recursively + force", () => {
+	it("rmSyncs the sense-voice dir recursively + force", () => {
 		vi.mocked(rmSync).mockClear();
 		removeModelInstall();
-		expect(vi.mocked(rmSync)).toHaveBeenCalledWith(WHISPER_BASE_DIR, { recursive: true, force: true });
+		expect(vi.mocked(rmSync)).toHaveBeenCalledWith(MODEL_DIR, { recursive: true, force: true });
 	});
 });
 
@@ -179,7 +175,7 @@ describe("ensureModelDownloaded — progress reporting", () => {
 
 describe("assertModelIntact", () => {
 	it("throws when a required model file is missing", () => {
-		// Override existsSync per call: first two true (encoder, decoder) then false (tokens)
+		// Override existsSync per call: first true (model), then false (tokens)
 		const seq = [true, false];
 		vi.mocked(existsSync).mockImplementation(() => seq.shift() ?? false);
 		expect(() => assertModelIntact()).toThrow(/Model verification failed/);

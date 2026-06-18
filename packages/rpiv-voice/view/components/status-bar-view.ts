@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import type { RecordingStatus } from "../../state/state.js";
+import type { RecordingStatus, SttBackend } from "../../state/state.js";
 import { STATUS_META } from "../../state/status-intent.js";
 import type { StatefulView } from "../stateful-view.js";
 
@@ -10,9 +10,16 @@ const TRUNCATE_ELLIPSIS = "…";
 const COLOR_ACCENT = "accent";
 const COLOR_DIM = "dim";
 const COLOR_MUTED = "muted";
+const COLOR_WARNING = "warning";
 
 const RECORDING_PULSE_COLORS = ["error", "error", "error", "dim"] as const;
 export const STATUS_BAR_PULSE_FRAME_INTERVAL_MS = 200;
+
+// STT backend display labels
+const STT_BACKEND_LABEL: Record<SttBackend, string> = {
+	"qwen3-asr": "Qwen3-ASR",
+	"sense-voice": "SenseVoice (fallback)",
+};
 
 // Plain text key names instead of glyphs (`⏎ ␣ ⇥ ⎋`): most terminal fonts
 // substitute lookalikes whose vertical metrics don't match the surrounding
@@ -31,13 +38,14 @@ function splitHint(literal: string): { key: string; action: string } {
 
 export interface StatusBarViewProps {
 	status: RecordingStatus;
+	sttBackend: SttBackend;
 	/** Pre-resolved i18n strings ("Enter to paste", "Esc to go back"…). The
 	 *  selector decides which set to pass based on the current screen. */
 	hints: readonly string[];
 }
 
 export class StatusBarView implements StatefulView<StatusBarViewProps> {
-	private props: StatusBarViewProps = { status: "recording", hints: [] };
+	private props: StatusBarViewProps = { status: "recording", sttBackend: "qwen3-asr", hints: [] };
 	private pulseFrame = 0;
 	private readonly startedAtMs: number;
 	private pausedAtMs: number | undefined;
@@ -76,6 +84,12 @@ export class StatusBarView implements StatefulView<StatusBarViewProps> {
 		const glyph = this.theme.fg(glyphColor, meta.glyph);
 		const timerColor = this.props.status === "recording" ? COLOR_ACCENT : COLOR_MUTED;
 		const timer = this.theme.fg(timerColor, formatElapsed(this.elapsedMs()));
+
+		// STT backend label: highlight when using fallback
+		const backendLabel = STT_BACKEND_LABEL[this.props.sttBackend];
+		const backendColor = this.props.sttBackend === "sense-voice" ? COLOR_WARNING : COLOR_MUTED;
+		const backendTag = this.theme.fg(backendColor, `[${backendLabel}]`);
+
 		const hints = this.props.hints
 			.map((literal) => {
 				const { key, action } = splitHint(literal);
@@ -83,7 +97,7 @@ export class StatusBarView implements StatefulView<StatusBarViewProps> {
 			})
 			.join(this.theme.fg(COLOR_DIM, HINT_SEP));
 
-		const line = `${glyph} ${timer}${GAP}${hints}`;
+		const line = `${glyph} ${timer} ${backendTag}${GAP}${hints}`;
 		return [truncateToWidth(line, width, TRUNCATE_ELLIPSIS, false)];
 	}
 

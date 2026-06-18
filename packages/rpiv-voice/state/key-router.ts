@@ -1,5 +1,5 @@
 import { Key, matchesKey } from "@earendil-works/pi-tui";
-import type { VoiceRuntime, VoiceState } from "./state.js";
+import type { SttBackend, VoiceRuntime, VoiceState } from "./state.js";
 
 const KEYBIND_CONFIRM = "tui.select.confirm";
 // Mirrors the rpiv-ask-user-question peer pattern — cancel goes through the
@@ -14,6 +14,7 @@ export type VoiceAction =
 	| { kind: "audio_chunk"; level: number }
 	| { kind: "audio_transcript_appended"; text: string }
 	| { kind: "audio_partial_transcript_set"; text: string }
+	| { kind: "stt_backend_set"; backend: SttBackend }
 	| { kind: "toggle_pause" }
 	| { kind: "commit" }
 	| { kind: "cancel" }

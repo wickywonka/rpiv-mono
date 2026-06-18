@@ -36,7 +36,7 @@ describe("StatusBarView.tickPulse()", () => {
 			fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
 		}) as unknown as Theme;
 		const view = new StatusBarView(tagged);
-		view.setProps({ status: "recording", hints: [] });
+		view.setProps({ status: "recording", hints: [], sttBackend: "qwen3-asr" });
 
 		// Glyph is the first wrapped span in the line. Pull just the color key.
 		const colorOf = (line: string): string | undefined => {
@@ -58,7 +58,7 @@ describe("StatusBarView.tickPulse()", () => {
 			fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
 		}) as unknown as Theme;
 		const view = new StatusBarView(tagged);
-		view.setProps({ status: "paused", hints: [] });
+		view.setProps({ status: "paused", hints: [], sttBackend: "qwen3-asr" });
 		const before = view.render(WIDTH)[0];
 		view.tickPulse();
 		view.tickPulse();
@@ -85,14 +85,14 @@ describe("StatusBarView elapsed-time formatting", () => {
 
 	it("renders 0:00 immediately after construction", () => {
 		const view = new StatusBarView(theme);
-		view.setProps({ status: "recording", hints: [] });
+		view.setProps({ status: "recording", hints: [], sttBackend: "qwen3-asr" });
 		const line = view.render(WIDTH)[0];
 		expect(line).toContain("0:00");
 	});
 
 	it("formats sub-minute elapsed as m:ss with zero-padded seconds", () => {
 		const view = new StatusBarView(theme);
-		view.setProps({ status: "recording", hints: [] });
+		view.setProps({ status: "recording", hints: [], sttBackend: "qwen3-asr" });
 		clock.advance(7_000);
 		expect(view.render(WIDTH)[0]).toContain("0:07");
 		clock.advance(53_000);
@@ -101,27 +101,27 @@ describe("StatusBarView elapsed-time formatting", () => {
 
 	it("rolls past minute boundaries cleanly", () => {
 		const view = new StatusBarView(theme);
-		view.setProps({ status: "recording", hints: [] });
+		view.setProps({ status: "recording", hints: [], sttBackend: "qwen3-asr" });
 		clock.advance(125_000); // 2:05
 		expect(view.render(WIDTH)[0]).toContain("2:05");
 	});
 
 	it("excludes paused duration from the elapsed timer", () => {
 		const view = new StatusBarView(theme);
-		view.setProps({ status: "recording", hints: [] });
+		view.setProps({ status: "recording", hints: [], sttBackend: "qwen3-asr" });
 		clock.advance(5_000); // 0:05 recording
-		view.setProps({ status: "paused", hints: [] });
+		view.setProps({ status: "paused", hints: [], sttBackend: "qwen3-asr" });
 		clock.advance(60_000); // pause for a minute — should NOT count
-		view.setProps({ status: "recording", hints: [] });
+		view.setProps({ status: "recording", hints: [], sttBackend: "qwen3-asr" });
 		clock.advance(3_000); // resume + 0:03
 		expect(view.render(WIDTH)[0]).toContain("0:08");
 	});
 
 	it("freezes the timer while paused (live pause excluded)", () => {
 		const view = new StatusBarView(theme);
-		view.setProps({ status: "recording", hints: [] });
+		view.setProps({ status: "recording", hints: [], sttBackend: "qwen3-asr" });
 		clock.advance(10_000); // 0:10
-		view.setProps({ status: "paused", hints: [] });
+		view.setProps({ status: "paused", hints: [], sttBackend: "qwen3-asr" });
 		clock.advance(30_000); // still paused
 		expect(view.render(WIDTH)[0]).toContain("0:10");
 		clock.advance(30_000); // still paused

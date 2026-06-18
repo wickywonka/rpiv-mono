@@ -62,6 +62,12 @@ const audioPartialTranscriptSet: Handler<"audio_partial_transcript_set"> = (stat
 	return { state: { ...state, partialTranscript: action.text }, effects: [{ kind: "request_render" }] };
 };
 
+// Update which STT backend is currently active.
+const sttBackendSet: Handler<"stt_backend_set"> = (state, action, _ctx) => {
+	if (state.sttBackend === action.backend) return { state, effects: [] };
+	return { state: { ...state, sttBackend: action.backend }, effects: [{ kind: "request_render" }] };
+};
+
 const togglePause: Handler<"toggle_pause"> = (state, _action, _ctx) => {
 	const nextStatus = state.status === "paused" ? "recording" : "paused";
 	return {
@@ -170,6 +176,7 @@ const HANDLERS: { [K in VoiceAction["kind"]]: Handler<K> } = {
 	audio_chunk: audioChunk,
 	audio_transcript_appended: audioTranscriptAppended,
 	audio_partial_transcript_set: audioPartialTranscriptSet,
+	stt_backend_set: sttBackendSet,
 	toggle_pause: togglePause,
 	commit,
 	cancel,

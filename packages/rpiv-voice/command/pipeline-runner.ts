@@ -82,13 +82,19 @@ export function startDictationPipeline(
 			return;
 		}
 		try {
-			const text = await sttEngine.recognize(samples, TARGET_SAMPLE_RATE);
-			if (!text || (hallucinationFilterEnabled && isHallucination(text))) {
+			const result = await sttEngine.recognize(samples, TARGET_SAMPLE_RATE, (partialText) => {
+				session.dispatchAction({
+					kind: "audio_partial_transcript_set",
+					text: partialText,
+				});
+			});
+			session.dispatchAction({ kind: "stt_backend_set", backend: result.backend as "qwen3-asr" | "sense-voice" });
+			if (!result.text || (hallucinationFilterEnabled && isHallucination(result.text))) {
 				session.dispatchAction({ kind: "audio_transcript_appended", text: "" });
 				return;
 			}
-			transcript = transcript ? `${transcript} ${text}` : text;
-			session.dispatchAction({ kind: "audio_transcript_appended", text });
+			transcript = transcript ? `${transcript} ${result.text}` : result.text;
+			session.dispatchAction({ kind: "audio_transcript_appended", text: result.text });
 		} catch (err) {
 			// We deliberately do not surface this to the TUI: writing to stderr
 			// corrupts the active render, and `notify` would churn the chat for
@@ -139,10 +145,16 @@ export function startDictationPipeline(
 			try {
 				const samples = bufferToFloat32(Buffer.concat(snapshot));
 				if (computeRmsFloat32(samples) < MIN_SEGMENT_RMS) return;
-				const text = await sttEngine.recognize(samples, TARGET_SAMPLE_RATE);
+				const result = await sttEngine.recognize(samples, TARGET_SAMPLE_RATE, (partialText) => {
+					session.dispatchAction({
+						kind: "audio_partial_transcript_set",
+						text: partialText,
+					});
+				});
 				if (snapshotEpoch !== utteranceEpoch) return;
-				if (hallucinationFilterEnabled && isHallucination(text)) return;
-				session.dispatchAction({ kind: "audio_partial_transcript_set", text });
+				if (hallucinationFilterEnabled && isHallucination(result.text)) return;
+				session.dispatchAction({ kind: "stt_backend_set", backend: result.backend as "qwen3-asr" | "sense-voice" });
+				session.dispatchAction({ kind: "audio_partial_transcript_set", text: result.text });
 			} catch (err) {
 				appendErrorLog("stt.recognize.partial", err);
 			} finally {

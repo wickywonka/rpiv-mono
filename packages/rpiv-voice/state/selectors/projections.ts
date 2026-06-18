@@ -7,8 +7,8 @@ import type { FooterHintKey } from "../screen-intent.js";
 import { SCREEN_META } from "../screen-intent.js";
 import type { GlobalSelector } from "./contract.js";
 
-// Locales the bundled Whisper base multilingual model recognizes well. Mirror
-// of WHISPER_SUPPORTED_LANGUAGES in voice-command.ts — duplicated rather than
+// Locales SenseVoice-Small recognizes well. Mirror
+// of SENSE_VOICE_LANGUAGES in voice-command.ts — duplicated rather than
 // imported to keep selectors free of command-layer deps. Codes outside this
 // set fall through to the auto-detect display.
 //
@@ -57,7 +57,7 @@ export const selectStatusBarProps: GlobalSelector<StatusBarViewProps> = (state, 
 	const meta = SCREEN_META[state.currentScreen];
 	const hints: string[] = [];
 	for (const key of meta.footerHints) hints.push(hintLabel(key, state));
-	return { status: state.status, hints };
+	return { status: state.status, sttBackend: state.sttBackend, hints };
 };
 
 export const selectTranscriptProps: GlobalSelector<TranscriptViewProps> = (state, _ctx) => ({

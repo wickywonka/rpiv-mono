@@ -1,7 +1,6 @@
 // Ambient type declarations for sherpa-onnx-node (no .d.ts shipped upstream).
-// Mirrors `nodejs-addon-examples/test_asr_non_streaming_whisper.js` from
-// k2-fsa/sherpa-onnx — top-level keys are camelCase; binding converts to
-// snake_case C struct internally.
+// Mirrors upstream sherpa-onnx Node.js examples and C++ config structs.
+// Top-level keys are camelCase; binding converts to snake_case internally.
 
 declare module "sherpa-onnx-node" {
 	export interface Samples {
@@ -25,20 +24,19 @@ declare module "sherpa-onnx-node" {
 		decode(stream: Stream): void;
 		getResult(stream: Stream): Result;
 	}
-	// Whisper config: `language` and `task` are optional (and meaningless for
-	// the *.en monolingual variants — the upstream example omits them
-	// entirely). `tailPaddings` defaults to 0.
-	export interface WhisperModelConfig {
-		encoder: string;
-		decoder: string;
+	// SenseVoice config — matches OfflineSenseVoiceModelConfig in sherpa-onnx.
+	// `language` is one of: auto, zh, en, ko, ja, yue.
+	// `useItn` enables inverse text normalization (punctuation/numbers).
+	export interface SenseVoiceModelConfig {
+		model: string; // path to model.int8.onnx
 		language?: string;
-		task?: string;
-		tailPaddings?: number;
+		useItn?: boolean;
 	}
+
 	export interface Config {
 		featConfig: { sampleRate: number; featureDim: number };
 		modelConfig: {
-			whisper: WhisperModelConfig;
+			senseVoice: SenseVoiceModelConfig;
 			tokens: string;
 			numThreads?: number;
 			provider?: string;

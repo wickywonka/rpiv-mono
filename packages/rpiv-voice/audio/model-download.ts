@@ -1,16 +1,14 @@
 /**
- * model-download — fetches the multilingual Whisper base model archive into
- * `~/.pi/models/whisper-base/`, extracts it, prunes unused fp32 duplicates,
- * and writes a sentinel file marking the install complete.
+ * model-download — fetches the SenseVoice-Small int8 ONNX model archive into
+ * `~/.pi/models/sense-voice/`, extracts it, and writes a sentinel file marking
+ * the install complete.
  *
- * The upstream archive ships BOTH fp32 (~290 MB) and int8 (~155 MB) variants
- * in one tarball. We use int8 for CPU inference, so we delete the fp32
- * duplicates after extraction to keep on-disk usage to ~157 MB.
+ * SenseVoice-Small is a non-autoregressive, multilingual ASR model optimized
+ * for Chinese (Mandarin), Cantonese, English, Japanese, and Korean. It runs
+ * fully on CPU via sherpa-onnx, is faster than Whisper, and significantly more
+ * accurate for Chinese speech.
  *
- * Progress is surfaced phase-by-phase (downloading → extracting → verifying);
- * we deliberately don't forward per-chunk fetch progress, because callers
- * pipe phase strings into a single-line ctx.ui.setStatus and per-chunk would
- * spam the status surface.
+ * Progress is surfaced phase-by-phase (downloading → extracting → verifying).
  */
 
 import { execFile } from "node:child_process";
@@ -25,41 +23,34 @@ import { t } from "../state/i18n-bridge.js";
 const execFileAsync = promisify(execFile);
 
 // ── Paths ────────────────────────────────────────────────────────────────────
-const MODEL_DIR_NAME = "whisper-base";
+const MODEL_DIR_NAME = "sense-voice";
 export const MODELS_DIR = join(homedir(), ".pi", "models");
-export const WHISPER_BASE_DIR = join(MODELS_DIR, MODEL_DIR_NAME);
+export const MODEL_DIR = join(MODELS_DIR, MODEL_DIR_NAME);
 export const SENTINEL_FILE = ".download-complete";
 
 // ── Source archive ───────────────────────────────────────────────────────────
-// Approx archive size on the wire is ~198 MB; the splash now shows the exact
-// total once Content-Length is parsed, so we no longer encode the estimate
-// in any user-facing string. Kept here for documentation only.
+// SenseVoice-Small int8: ~228 MB model + tokens + test_wavs.
+// We use the 2024-07-17 release which supports ITN (punctuation/numbers).
 const MODEL_RELEASE_TAG = "asr-models";
-const MODEL_ARCHIVE_NAME = "sherpa-onnx-whisper-base.tar.bz2";
+const MODEL_ARCHIVE_NAME = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2";
 const MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/${MODEL_RELEASE_TAG}/${MODEL_ARCHIVE_NAME}`;
 
-// ── Files we keep (int8 quantized) ──────────────────────────────────────────
-const ENCODER_FILE = "base-encoder.int8.onnx";
-const DECODER_FILE = "base-decoder.int8.onnx";
-const TOKENS_FILE = "base-tokens.txt";
-const REQUIRED_FILES: readonly string[] = [ENCODER_FILE, DECODER_FILE, TOKENS_FILE];
-
-// ── Files we delete after extraction (fp32 dupes we don't need on CPU) ──────
-const FP32_ENCODER_FILE = "base-encoder.onnx";
-const FP32_DECODER_FILE = "base-decoder.onnx";
-const FP32_DUPLICATE_FILES: readonly string[] = [FP32_ENCODER_FILE, FP32_DECODER_FILE];
+// ── Files we need ────────────────────────────────────────────────────────────
+const MODEL_FILE = "model.int8.onnx";
+const TOKENS_FILE = "tokens.txt";
+const REQUIRED_FILES: readonly string[] = [MODEL_FILE, TOKENS_FILE];
 
 // ── Tar invocation ───────────────────────────────────────────────────────────
 const TAR_BIN = "tar";
 // `--strip-components=1` flattens sherpa's top-level wrapper directory so the
-// REQUIRED_FILES land directly inside WHISPER_BASE_DIR.
+// REQUIRED_FILES land directly inside MODEL_DIR.
 const TAR_FLAGS: readonly string[] = ["-xjf"];
 const TAR_STRIP_FLAG = "--strip-components=1";
 
 // ── Status messages ──────────────────────────────────────────────────────────
 // Resolved at progress-emit time (not module load) so live `/languages` flips
 // take effect mid-download.
-const msgDownloading = (): string => t("splash.downloading", "Downloading Whisper…");
+const msgDownloading = (): string => t("splash.downloading", "Downloading speech model…");
 const msgExtracting = (): string => t("splash.extracting", "Extracting model files…");
 const msgVerifying = (): string => t("splash.verifying", "Verifying model files…");
 
@@ -83,12 +74,6 @@ export type ProgressCallback = (progress: DownloadProgress) => void;
 // no-op renders. 200 ms feels lively without being chatty.
 const PROGRESS_THROTTLE_MS = 200;
 
-export interface ModelPaths {
-	encoderPath: string;
-	decoderPath: string;
-	tokensPath: string;
-}
-
 export type ModelInstallStage = "download" | "extract" | "verify";
 
 /**
@@ -107,15 +92,19 @@ export class ModelInstallError extends Error {
 	}
 }
 
+export interface ModelPaths {
+	modelPath: string; // SenseVoice: single model.int8.onnx
+	tokensPath: string;
+}
+
 export function isModelDownloaded(): boolean {
-	return existsSync(join(WHISPER_BASE_DIR, SENTINEL_FILE));
+	return existsSync(join(MODEL_DIR, SENTINEL_FILE));
 }
 
 export function getModelPaths(): ModelPaths {
 	return {
-		encoderPath: join(WHISPER_BASE_DIR, ENCODER_FILE),
-		decoderPath: join(WHISPER_BASE_DIR, DECODER_FILE),
-		tokensPath: join(WHISPER_BASE_DIR, TOKENS_FILE),
+		modelPath: join(MODEL_DIR, MODEL_FILE),
+		tokensPath: join(MODEL_DIR, TOKENS_FILE),
 	};
 }
 
@@ -135,14 +124,14 @@ export function assertModelIntact(): void {
 /** Wipe the entire model directory — used to recover from any partial /
  * corrupt install state. Idempotent and silent on missing dir. */
 export function removeModelInstall(): void {
-	rmSync(WHISPER_BASE_DIR, { recursive: true, force: true });
+	rmSync(MODEL_DIR, { recursive: true, force: true });
 }
 
 export async function ensureModelDownloaded(onProgress: ProgressCallback, signal?: AbortSignal): Promise<ModelPaths> {
 	if (isModelDownloaded()) return getModelPaths();
 
-	mkdirSync(WHISPER_BASE_DIR, { recursive: true });
-	const archivePath = join(WHISPER_BASE_DIR, MODEL_ARCHIVE_NAME);
+	mkdirSync(MODEL_DIR, { recursive: true });
+	const archivePath = join(MODEL_DIR, MODEL_ARCHIVE_NAME);
 
 	// Any failure between mkdir and writeSentinel leaves a half-populated
 	// directory (partial archive, partially-extracted .onnx, etc.) but no
@@ -177,9 +166,8 @@ export async function ensureModelDownloaded(onProgress: ProgressCallback, signal
 
 		onProgress({ phase: "extracting", message: msgExtracting() });
 		try {
-			await extractArchive(archivePath, WHISPER_BASE_DIR);
+			await extractArchive(archivePath, MODEL_DIR);
 			rmSync(archivePath, { force: true });
-			pruneFp32Duplicates();
 		} catch (err) {
 			throw new ModelInstallError("extract", err);
 		}
@@ -247,22 +235,14 @@ async function extractArchive(archivePath: string, destDir: string): Promise<voi
 	await execFileAsync(TAR_BIN, [...TAR_FLAGS, archivePath, "-C", destDir, TAR_STRIP_FLAG]);
 }
 
-// The Whisper archive ships fp32 + int8 side-by-side (~290 MB of fp32 we
-// don't use on CPU). Drop them so the install settles around ~157 MB.
-function pruneFp32Duplicates(): void {
-	for (const name of FP32_DUPLICATE_FILES) {
-		rmSync(join(WHISPER_BASE_DIR, name), { force: true });
-	}
-}
-
 function verifyModelFiles(): void {
 	for (const name of REQUIRED_FILES) {
-		if (!existsSync(join(WHISPER_BASE_DIR, name))) {
+		if (!existsSync(join(MODEL_DIR, name))) {
 			throw new Error(`Model verification failed: missing ${name}`);
 		}
 	}
 }
 
 function writeSentinel(): void {
-	writeFileSync(join(WHISPER_BASE_DIR, SENTINEL_FILE), "", "utf-8");
+	writeFileSync(join(MODEL_DIR, SENTINEL_FILE), "", "utf-8");
 }

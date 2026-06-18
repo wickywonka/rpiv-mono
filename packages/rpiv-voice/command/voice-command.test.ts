@@ -1,17 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Module mocks ─────────────────────────────────────────────────────────────
-// vi.mock factories run before module-scope code (they're hoisted). Use
-// vi.hoisted to declare shared spies in the same hoisted phase so the mock
-// factories can close over them without a TDZ error.
 const mocks = vi.hoisted(() => {
 	const ensureModelDownloaded = vi.fn();
 	const isModelDownloaded = vi.fn(() => true);
 	const assertModelIntact = vi.fn();
 	const removeModelInstall = vi.fn();
 	const getModelPaths = vi.fn(() => ({
-		encoderPath: "/m/encoder.onnx",
-		decoderPath: "/m/decoder.onnx",
+		modelPath: "/m/model.int8.onnx",
 		tokensPath: "/m/tokens.txt",
 	}));
 	class ModelInstallError extends Error {
@@ -23,8 +19,9 @@ const mocks = vi.hoisted(() => {
 		}
 	}
 	const sttEngineRelease = vi.fn();
-	const createSttEngine = vi.fn(async () => ({
-		recognize: vi.fn(async () => ""),
+	const sttEngineRecognize = vi.fn(async () => ({ text: "", backend: "asr" as const }));
+	const createSttEngine = vi.fn(() => ({
+		recognize: sttEngineRecognize,
 		release: sttEngineRelease,
 	}));
 	const createMic = vi.fn(async () => ({
@@ -39,11 +36,7 @@ const mocks = vi.hoisted(() => {
 		setHallucinationFilterEnabled: vi.fn(),
 		stop: vi.fn(),
 	}));
-	const getActiveLocale = vi.fn<() => string | undefined>(() => undefined);
 	const sessionState: { done?: (r: { intent: "commit" | "cancel"; transcript: string }) => void } = {};
-	// Regular function (not arrow) — vi.fn wraps it so call counts work, but
-	// production code does `new VoiceSession(...)` and arrows can't be
-	// constructors.
 	const VoiceSession = vi.fn(function (
 		this: Record<string, unknown>,
 		cfg: { done: NonNullable<typeof sessionState.done> },
@@ -61,10 +54,10 @@ const mocks = vi.hoisted(() => {
 		getModelPaths,
 		ModelInstallError,
 		sttEngineRelease,
+		sttEngineRecognize,
 		createSttEngine,
 		createMic,
 		startDictationPipeline,
-		getActiveLocale,
 		sessionState,
 		VoiceSession,
 	};
@@ -95,9 +88,6 @@ vi.mock("../audio/mic-source.js", () => ({
 }));
 
 vi.mock("../config/voice-config.js", async (importOriginal) => {
-	// Keep the real module surface (including `__resetState`, which the repo-
-	// wide test/setup.ts beforeEach calls) and only stub the two functions the
-	// voice-command file consumes.
 	const actual = await importOriginal<typeof import("../config/voice-config.js")>();
 	return {
 		...actual,
@@ -110,11 +100,8 @@ vi.mock("./pipeline-runner.js", () => ({ startDictationPipeline: mocks.startDict
 
 vi.mock("../state/voice-session.js", () => ({ VoiceSession: mocks.VoiceSession }));
 
-// `t(key, fallback)` returns the KEY so notify-call assertions can match
-// against the canonical i18n key instead of the English copy.
 vi.mock("../state/i18n-bridge.js", () => ({
 	t: (key: string, _fallback: string) => key,
-	getActiveLocale: mocks.getActiveLocale,
 	I18N_NAMESPACE: "@juicesharp/rpiv-voice",
 }));
 
@@ -125,10 +112,10 @@ const {
 	removeModelInstall,
 	ModelInstallError,
 	sttEngineRelease,
+	sttEngineRecognize,
 	createSttEngine,
 	createMic,
 	startDictationPipeline,
-	getActiveLocale,
 	sessionState,
 } = mocks;
 
@@ -139,16 +126,15 @@ type Handler = (args: string, ctx: unknown) => Promise<void>;
 
 function captureHandler(): { handler: Handler; registerCommand: ReturnType<typeof vi.fn> } {
 	let handler: Handler | undefined;
-	const registerCommand = vi.fn((_n: string, spec: { handler: Handler }) => {
-		handler = spec.handler;
+	const registerCommand = vi.fn((name: string, spec: { handler: Handler }) => {
+		// registerVoiceCommand now registers both /voice and /voice-convo.
+		// Capture the /voice handler (first), not /voice-convo.
+		if (name === "voice") handler = spec.handler;
 	});
 	registerVoiceCommand({ registerCommand } as never);
 	return { handler: handler!, registerCommand };
 }
 
-// runPreflight + runDictationSession chain ~half a dozen awaits before the
-// VoiceSession constructor captures `done`. Spin the microtask queue a few
-// times until the constructor has run.
 async function waitForSessionDone(timeoutMs = 500): Promise<void> {
 	const start = Date.now();
 	while (!sessionState.done && Date.now() - start < timeoutMs) {
@@ -164,8 +150,6 @@ function makeCtx(overrides: { notify?: ReturnType<typeof vi.fn>; pasteToEditor?:
 		ui: {
 			notify,
 			pasteToEditor,
-			// runDictationSession awaits ctx.ui.custom — invoke the body once with
-			// stubs and resolve to whatever the body's `done` is called with.
 			custom: vi.fn((body: (tui: unknown, theme: unknown, kb: unknown, done: (v: unknown) => void) => unknown) => {
 				return new Promise<unknown>((resolve) => {
 					body({ requestRender: vi.fn() }, {}, {}, resolve);
@@ -176,7 +160,8 @@ function makeCtx(overrides: { notify?: ReturnType<typeof vi.fn>; pasteToEditor?:
 	return { ctx, notify, pasteToEditor };
 }
 
-// ── Existing smoke coverage ─────────────────────────────────────────────────
+// ── Tests ───────────────────────────────────────────────────────────────────
+
 describe("VOICE_COMMAND_NAME", () => {
 	it("exports 'voice'", () => {
 		expect(VOICE_COMMAND_NAME).toBe("voice");
@@ -184,14 +169,16 @@ describe("VOICE_COMMAND_NAME", () => {
 });
 
 describe("registerVoiceCommand", () => {
-	it("calls pi.registerCommand with the voice command name", () => {
+	it("calls pi.registerCommand with the voice command name and voice-convo", () => {
 		const registerCommand = vi.fn();
 		const pi = { registerCommand } as never;
 		registerVoiceCommand(pi);
-		expect(registerCommand).toHaveBeenCalledOnce();
+		expect(registerCommand).toHaveBeenCalledTimes(2);
 		expect(registerCommand.mock.calls[0][0]).toBe("voice");
 		expect(registerCommand.mock.calls[0][1]).toHaveProperty("handler");
 		expect(typeof registerCommand.mock.calls[0][1].handler).toBe("function");
+		expect(registerCommand.mock.calls[1][0]).toBe("voice-convo");
+		expect(registerCommand.mock.calls[1][1]).toHaveProperty("handler");
 	});
 
 	it("handler notifies 'requires interactive mode' when hasUI is false", async () => {
@@ -206,14 +193,12 @@ describe("registerVoiceCommand", () => {
 // ── runPreflight: every error stage maps to its i18n key ────────────────────
 describe("handleVoiceCommand — preflight error mapping", () => {
 	beforeEach(() => {
-		// Re-establish happy-path defaults each test so per-test overrides are
-		// the only divergence from green.
 		isModelDownloaded.mockReturnValue(true);
 		ensureModelDownloaded.mockReset();
 		assertModelIntact.mockReset();
 		removeModelInstall.mockReset();
-		createSttEngine.mockReset().mockResolvedValue({
-			recognize: vi.fn(async () => ""),
+		createSttEngine.mockReset().mockReturnValue({
+			recognize: sttEngineRecognize,
 			release: sttEngineRelease,
 		});
 		createMic.mockReset().mockResolvedValue({ on: vi.fn(), once: vi.fn(), stop: vi.fn() });
@@ -250,8 +235,6 @@ describe("handleVoiceCommand — preflight error mapping", () => {
 	});
 
 	it("non-ModelInstallError during download → falls back to engine_load_failed", async () => {
-		// Bare Error (not ModelInstallError) hits the `?? "download"` fallback
-		// inside runPreflight's catch.
 		isModelDownloaded.mockReturnValue(false);
 		ensureModelDownloaded.mockRejectedValueOnce(new Error("opaque"));
 		const { handler } = captureHandler();
@@ -267,18 +250,14 @@ describe("handleVoiceCommand — preflight error mapping", () => {
 		const { handler } = captureHandler();
 		const { ctx, notify } = makeCtx();
 		await handler("", ctx);
-		// Recovery: the corrupt install is wiped so the next launch redownloads.
 		expect(removeModelInstall).toHaveBeenCalledOnce();
-		// User-facing copy must be the stale-install message — not the generic
-		// engine_load_failed fallback. This guards a regression where the outer
-		// catch around assertModelIntact + createSttEngine flattened every
-		// inner PreflightError back to PreflightError("engine") and made the
-		// `case "stale_install"` arm of preflightUserMessage unreachable.
 		expect(notify).toHaveBeenCalledWith("error.model_stale_install", "error");
 	});
 
 	it("engine load failure → notifies engine_load_failed", async () => {
-		createSttEngine.mockRejectedValueOnce(new Error("native crash"));
+		createSttEngine.mockImplementationOnce(() => {
+			throw new Error("native crash");
+		});
 		const { handler } = captureHandler();
 		const { ctx, notify } = makeCtx();
 		await handler("", ctx);
@@ -295,61 +274,13 @@ describe("handleVoiceCommand — preflight error mapping", () => {
 	});
 });
 
-// ── Whisper language hint, driven via getActiveLocale → createSttEngine ─────
-describe("handleVoiceCommand — whisper language hint", () => {
-	beforeEach(() => {
-		isModelDownloaded.mockReturnValue(true);
-		assertModelIntact.mockReset();
-		createSttEngine.mockReset().mockResolvedValue({
-			recognize: vi.fn(async () => ""),
-			release: sttEngineRelease,
-		});
-		createMic.mockReset().mockResolvedValue({ on: vi.fn(), once: vi.fn(), stop: vi.fn() });
-		sessionState.done = undefined;
-	});
-
-	async function runOnceWithLocale(locale: string | undefined): Promise<unknown> {
-		getActiveLocale.mockReturnValue(locale);
-		const { handler } = captureHandler();
-		const { ctx } = makeCtx();
-		const promise = handler("", ctx);
-		// Body of ctx.ui.custom captured `latestSessionDone` synchronously when
-		// VoiceSession was constructed. Resolve the dictation session with a
-		// cancel so the handler returns without trying to paste.
-		await waitForSessionDone();
-		sessionState.done?.({ intent: "cancel", transcript: "" });
-		await promise;
-		// `createSttEngine` is hoisted-typed as `() => Promise<...>` (no params)
-		// so vi.fn's typing thinks `mock.calls` is `[][]`. Reach for the args via
-		// an unknown cast — at runtime production passes a config object.
-		const lastCall = createSttEngine.mock.calls.at(-1) as unknown as Array<{ language?: string }>;
-		return lastCall?.[0]?.language;
-	}
-
-	it("maps a supported locale (uk) to its base language", async () => {
-		expect(await runOnceWithLocale("uk")).toBe("uk");
-	});
-
-	it("strips the region subtag for IETF tags (pt-BR → pt)", async () => {
-		expect(await runOnceWithLocale("pt-BR")).toBe("pt");
-	});
-
-	it("falls back to undefined for an unsupported base (xx)", async () => {
-		expect(await runOnceWithLocale("xx")).toBeUndefined();
-	});
-
-	it("falls back to undefined when no active locale", async () => {
-		expect(await runOnceWithLocale(undefined)).toBeUndefined();
-	});
-});
-
 // ── Happy path: commit dispatch → pasteToEditor ─────────────────────────────
 describe("handleVoiceCommand — happy path", () => {
 	beforeEach(() => {
 		isModelDownloaded.mockReturnValue(true);
 		assertModelIntact.mockReset();
-		createSttEngine.mockReset().mockResolvedValue({
-			recognize: vi.fn(async () => ""),
+		createSttEngine.mockReset().mockReturnValue({
+			recognize: sttEngineRecognize,
 			release: sttEngineRelease,
 		});
 		createMic.mockReset().mockResolvedValue({ on: vi.fn(), once: vi.fn(), stop: vi.fn() });
@@ -365,7 +296,6 @@ describe("handleVoiceCommand — happy path", () => {
 		sessionState.done?.({ intent: "commit", transcript: "hello world" });
 		await run;
 		expect(pasteToEditor).toHaveBeenCalledWith("hello world");
-		// pipeline + STT engine were wired up.
 		expect(startDictationPipeline).toHaveBeenCalledOnce();
 		expect(sttEngineRelease).toHaveBeenCalledOnce();
 	});

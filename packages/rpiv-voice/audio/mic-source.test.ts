@@ -110,7 +110,7 @@ describe("createMic — strategy 1: 16 kHz + Silero (the happy path on USB heads
 		expect(opts.framesPerBuffer).toBe(1600);
 		expect(opts.vad).toBe(true);
 		expect(opts.vadMode).toBe("silero");
-		expect(opts.vadHoldoff).toBe(500);
+		expect(opts.vadHoldoff).toBe(2000);
 	});
 
 	it("forwards decibri's data and silence events as-is on the silero-passthrough path", async () => {
