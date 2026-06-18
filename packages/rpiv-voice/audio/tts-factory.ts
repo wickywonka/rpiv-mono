@@ -10,10 +10,7 @@
  */
 
 import { Readable } from "node:stream";
-import { createLocalCliTtsClient } from "./adapters/local-cli-tts-adapter.js";
 import { createOpenaiTtsClient } from "./adapters/openai-tts-adapter.js";
-import { createSystemTtsClient } from "./adapters/system-tts-adapter.js";
-import { createWsTtsClient } from "./adapters/ws-tts-adapter.js";
 import { appendErrorLog } from "./error-log.js";
 import type { TtsClient, TtsServiceConfig } from "./tts-client.js";
 
@@ -121,19 +118,11 @@ export function createTtsClientFromConfig(ttsServices: TtsServiceConfig[]): TtsC
 }
 
 function createAdapter(svc: TtsServiceConfig): TtsClient {
-	switch (svc.protocol) {
-		case "ws-streaming":
-			return createWsTtsClient(svc);
-		case "openai-tts":
-			return createOpenaiTtsClient(svc);
-		case "system-tts":
-			return createSystemTtsClient(svc);
-		case "local-cli":
-			return createLocalCliTtsClient(svc);
-		default:
-			// Unknown protocol: fall back to system TTS.
-			return createSystemTtsClient({ ...svc, protocol: "system-tts" });
+	if (svc.protocol === "openai-tts") {
+		return createOpenaiTtsClient(svc);
 	}
+	// Unknown protocol: fall back to openai-tts.
+	return createOpenaiTtsClient({ ...svc, protocol: "openai-tts" });
 }
 
 function svcLabel(cfg: TtsServiceConfig): string {

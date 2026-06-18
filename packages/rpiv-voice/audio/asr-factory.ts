@@ -9,11 +9,7 @@
  * The rest of rpiv-voice never imports individual adapters.
  */
 
-import { createCrispSseAsrClient } from "./adapters/crisp-sse-asr-adapter.js";
-import { createOpenaiAsrClient } from "./adapters/openai-asr-adapter.js";
-import { createSherpaAsrClient } from "./adapters/sherpa-asr-adapter.js";
 import { createVllmRealtimeAsrClient } from "./adapters/vllm-realtime-asr-adapter.js";
-import { createWsAsrClient } from "./adapters/ws-asr-adapter.js";
 import type { AsrClient, AsrServiceConfig } from "./asr-client.js";
 import { appendErrorLog } from "./error-log.js";
 
@@ -116,22 +112,11 @@ export function createAsrClientFromConfig(asrServices: AsrServiceConfig[]): AsrC
 }
 
 function createAdapter(svc: AsrServiceConfig): AsrClient {
-	switch (svc.protocol) {
-		case "ws-streaming":
-			return createWsAsrClient(svc);
-		case "crispasr-sse":
-			return createCrispSseAsrClient(svc);
-		case "vllm-realtime":
-			return createVllmRealtimeAsrClient(svc);
-		case "openai-file":
-		case "openai-streaming":
-			return createOpenaiAsrClient(svc);
-		case "local-sherpa":
-			return createSherpaAsrClient(svc);
-		default:
-			// Unknown protocol: fall back to openai-file as best guess.
-			return createOpenaiAsrClient(svc);
+	if (svc.protocol === "vllm-realtime") {
+		return createVllmRealtimeAsrClient(svc);
 	}
+	// Unknown protocol: fall back to vllm-realtime with the given URL.
+	return createVllmRealtimeAsrClient({ ...svc, protocol: "vllm-realtime" });
 }
 
 function svcLabel(cfg: AsrServiceConfig): string {
